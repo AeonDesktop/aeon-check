@@ -1,0 +1,46 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: Copyright 2024 SUSE LLC
+# SPDX-FileCopyrightText: Copyright 2024 Richard Brown
+
+set -euo pipefail
+
+# Setup logging
+exec 3>&1 4>&2
+trap 'exec 2>&4 1>&3' 0 1 2 3
+exec 1>>/var/log/aeon-check.log 2>&1
+
+boo1228416() {
+    # Determine root device
+    rootdev=/dev/$(dmsetup deps -o devname /dev/mapper/aeon_root | cut -d '(' -f2 | cut -d ')' -f1)
+    # Check for failure conditions
+    tpm2hashpcrs=$(cryptsetup luksDump ${rootdev} | grep 'tpm2-hash-pcrs:' | tr -d ' \t' | cut -d ':' -f2)
+    tpm2pcrlock=$(cryptsetup luksDump ${rootdev} | grep 'tpm2-pcrlock:' | tr -d ' \t' | cut -d ':' -f2)
+    # For boo1228416 to be an issue hashpcrs must be 7 and pcrlock must be false. Be paranoid, only match on both
+    if [ "${tpm2hashpcrs}" == "7" ] && [ "${tpm2pcrlock}" == "false" ]; then
+        echo "boo1228416 detected - TPM2 using pcr hashes not pcrlock - correcting"
+
+        # Need a keyfile to avoid requesting the recovery key when re-enrolling
+        keyfile=/tmp/aeon-check-keyfile
+        dd bs=512 count=4 if=/dev/urandom of=${keyfile} iflag=fullblock
+        chmod 400 ${keyfile}
+
+        # Should be slot 2, but better to check and be sure
+        tpm2slot=$(systemd-cryptenroll ${rootdev} | grep tpm2 | xargs | cut -d ' ' -f1)
+
+        # Writing keyfile to slot 31 (end of the LUKS2 space) to avoid clashes with any customisation/extra keys
+        cryptsetup luksAddKey --token-only --batch-mode --new-key-slot=31 ${rootdev} ${keyfile}
+
+        # Drop existing enrollment and re enroll
+        systemd-cryptenroll --wipe-slot=${tpm2slot} ${rootdev}
+        systemd-cryptenroll --unlock-key-file=${keyfile} --tpm2-device=auto ${rootdev}
+
+        # Wipe out keyfile and keyfile keyslot
+        systemd-cryptenroll --wipe-slot=31 ${rootdev}
+        rm ${keyfile}
+
+        echo "boo1228416 corrected"
+    fi
+}
+
+boo1228416

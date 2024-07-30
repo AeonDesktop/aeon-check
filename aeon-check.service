@@ -1,0 +1,9 @@
+[Unit]
+Description=Aeon Check Tool
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/aeon-check
+
+[Install]
+WantedBy=default.target
