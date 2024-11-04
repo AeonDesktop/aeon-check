@@ -21,7 +21,7 @@ boo1228416() {
         echo "boo1228416 detected - TPM2 using pcr hashes not pcrlock - correcting"
 
         # Need a keyfile to avoid requesting the recovery key when re-enrolling
-        keyfile=/tmp/aeon-check-keyfile
+        keyfile=$(mktemp /tmp/aeon-check.XXXXXXXXXX)
         dd bs=512 count=4 if=/dev/urandom of=${keyfile} iflag=fullblock
         chmod 400 ${keyfile}
 
