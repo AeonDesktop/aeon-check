@@ -11,6 +11,9 @@ trap 'exec 2>&4 1>&3' 0 1 2 3
 exec 1>>/var/log/aeon-check.log 2>&1
 
 boo1228416() {
+    # Problem: boo1228416. TPM2 using pcr hashes not pcrlock
+    # Solution: Configure and enrol pcrlock for FDE
+
     # Determine root device
     rootdev=/dev/$(dmsetup deps -o devname /dev/mapper/aeon_root | cut -d '(' -f2 | cut -d ')' -f1)
     # Check for failure conditions
@@ -43,4 +46,22 @@ boo1228416() {
     fi
 }
 
+boo1234234() {
+    # Problem: boo1234234 and related bugs. TPM2 enrolments failing because PCR0 invalidated by firmware updates.
+    # Solution: Stop measuring PCR0 and update-predictions with the reduced PCR list
+
+    # Only run if fde-tools is configured
+    if test -e /etc/sysconfig/fde-tools ; then
+        . /etc/sysconfig/fde-tools
+
+        if [ "${FDE_SEAL_PCR_LIST}" = "0,4,5,7,9" ]; then
+            echo "boo1234234 detected - PCR0 measured for TPM FDE sealing - correcting"
+            echo "FDE_SEAL_PCR_LIST=4,5,7,9" > /etc/sysconfig/fde-tools
+            sdbootutil -v update-predictions
+            echo "boo1234234 corrected"
+        fi
+    fi
+}
+
 boo1228416
+boo1234234
