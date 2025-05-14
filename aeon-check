@@ -63,5 +63,20 @@ boo1234234() {
     fi
 }
 
-boo1228416
+boo1243182() {
+    # Problem: Aeon should be using Zypp's single RPM transaction backend
+    # Solution: Add 'techpreview.ZYPP_SINGLE_RPMTRANS=1' to zypp.conf 
+
+    if ! grep -xF 'techpreview.ZYPP_SINGLE_RPMTRANS=1' /etc/zypp/zypp.conf ; then
+         echo 'boo1243182 detected - Not using ZYPP_SINGLE_RPMTRANS - correcting'
+         echo 'techpreview.ZYPP_SINGLE_RPMTRANS=1' >> /etc/zypp/zypp.conf
+         echo 'boo1243182 corrected'
+    fi
+}
+
+# Active fixes executed in order of importance
+boo1243182
 boo1234234
+
+# Deprecated fixes likely to be dropped in future aeon-check releases
+boo1228416
