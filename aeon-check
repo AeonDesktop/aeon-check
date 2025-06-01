@@ -10,35 +10,37 @@ exec 3>&1 4>&2
 trap 'exec 2>&4 1>&3' 0 1 2 3
 exec 1>>/var/log/aeon-check.log 2>&1
 
+# Load optional configuration
+FDE_ENABLED="true"
+if test -f /etc/sysconfig/fde-tools; then
+    . /etc/sysconfig/fde-tools
+fi
+
+# Check for TPM2 presence
+has_tpm2() {
+    tpm2_getcap properties-fixed &>/dev/null
+}
+
 boo1228416() {
-    # Problem: boo1228416. TPM2 using pcr hashes not pcrlock
+    # Problem: TPM2 using pcr hashes not pcrlock
     # Solution: Configure and enrol pcrlock for FDE
 
-    # Determine root device
     rootdev=/dev/$(dmsetup deps -o devname /dev/mapper/aeon_root | cut -d '(' -f2 | cut -d ')' -f1)
-    # Check for failure conditions
     tpm2hashpcrs=$(cryptsetup luksDump ${rootdev} | grep 'tpm2-hash-pcrs:' | tr -d ' \t' | cut -d ':' -f2)
     tpm2pcrlock=$(cryptsetup luksDump ${rootdev} | grep 'tpm2-pcrlock:' | tr -d ' \t' | cut -d ':' -f2)
-    # For boo1228416 to be an issue hashpcrs must be 7 and pcrlock must be false. Be paranoid, only match on both
+
     if [ "${tpm2hashpcrs}" == "7" ] && [ "${tpm2pcrlock}" == "false" ]; then
         echo "boo1228416 detected - TPM2 using pcr hashes not pcrlock - correcting"
 
-        # Need a keyfile to avoid requesting the recovery key when re-enrolling
         keyfile=$(mktemp /tmp/aeon-check.XXXXXXXXXX)
         dd bs=512 count=4 if=/dev/urandom of=${keyfile} iflag=fullblock
         chmod 400 ${keyfile}
 
-        # Should be slot 2, but better to check and be sure
         tpm2slot=$(systemd-cryptenroll ${rootdev} | grep tpm2 | xargs | cut -d ' ' -f1)
 
-        # Writing keyfile to slot 31 (end of the LUKS2 space) to avoid clashes with any customisation/extra keys
         cryptsetup luksAddKey --token-only --batch-mode --new-key-slot=31 ${rootdev} ${keyfile}
-
-        # Drop existing enrollment and re enroll
         systemd-cryptenroll --wipe-slot=${tpm2slot} ${rootdev}
         systemd-cryptenroll --unlock-key-file=${keyfile} --tpm2-device=auto ${rootdev}
-
-        # Wipe out keyfile and keyfile keyslot
         systemd-cryptenroll --wipe-slot=31 ${rootdev}
         rm ${keyfile}
 
@@ -47,15 +49,14 @@ boo1228416() {
 }
 
 boo1234234() {
-    # Problem: boo1234234 and related bugs. TPM2 enrolments failing because PCR0 invalidated by firmware updates.
-    # Solution: Stop measuring PCR0 and update-predictions with the reduced PCR list
+    # Problem: TPM2 enrolments failing due to PCR0
+    # Solution: Remove PCR0 from FDE seal list
 
-    # Only run if fde-tools is configured
     if test -e /etc/sysconfig/fde-tools ; then
         . /etc/sysconfig/fde-tools
 
         if [ "${FDE_SEAL_PCR_LIST}" = "0,4,5,7,9" ]; then
-            echo "boo1234234 detected - PCR0 measured for TPM FDE sealing - correcting"
+            echo "boo1234234 detected - PCR0 included - correcting"
             echo "FDE_SEAL_PCR_LIST=4,5,7,9" > /etc/sysconfig/fde-tools
             sdbootutil -v update-predictions
             echo "boo1234234 corrected"
@@ -64,8 +65,8 @@ boo1234234() {
 }
 
 boo1243182() {
-    # Problem: Aeon should be using Zypp's single RPM transaction backend
-    # Solution: Add 'techpreview.ZYPP_SINGLE_RPMTRANS=1' to zypp.conf 
+    # Problem: Not using ZYPP_SINGLE_RPMTRANS
+    # Solution: Enable it in zypp.conf
 
     if ! grep -qxF 'techpreview.ZYPP_SINGLE_RPMTRANS=1' /etc/zypp/zypp.conf ; then
          echo 'boo1243182 detected - Not using ZYPP_SINGLE_RPMTRANS - correcting'
@@ -74,9 +75,19 @@ boo1243182() {
     fi
 }
 
-# Active fixes executed in order of importance
-boo1243182
-boo1234234
+# Start main logic
 
-# Deprecated fixes likely to be dropped in future aeon-check releases
-boo1228416
+if [ "${FDE_ENABLED}" != "true" ]; then
+    echo "FDE explicitly disabled via configuration – skipping TPM2 checks"
+else
+    if has_tpm2; then
+        echo "TPM2 detected – applying relevant FDE fixes"
+        boo1228416
+        boo1234234
+    else
+        echo "No TPM2 detected – skipping FDE configuration"
+    fi
+fi
+
+# Active fixes unrelated to TPM/FDE
+boo1243182
