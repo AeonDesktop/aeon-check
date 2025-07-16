@@ -74,7 +74,18 @@ boo1243182() {
     fi
 }
 
+boo1246605() {
+    # Problem: Aeon should have 'ro=vfs' as a mount attribute for / in /etc/fstab
+    # Solution: Add 'ro=vfs' as a mount attribute for / in /etc/fstab
+    if gawk '$2 == "/" && $4 != "compress=zstd:1,ro=vfs"' /etc/fstab | grep -q / ; then
+        echo 'boo1246605 detected - fstab not using ro=vfs for / - correcting'
+        gawk -i inplace '$2 == "/" && $4 != "compress=zstd:1,ro=vfs" { $4 = "compress=zstd:1,ro=vfs" } { print $0 }' /etc/fstab
+        echo 'boo1246605 corrected'
+    fi
+}
+
 # Active fixes executed in order of importance
+boo1246605
 boo1243182
 boo1234234
 
